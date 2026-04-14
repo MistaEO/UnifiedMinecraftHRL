@@ -1,0 +1,1776 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Minecraft HRL — Tech Tree Editor</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Space+Grotesk:wght@400;500;600&display=swap');
+
+  :root {
+    --bg:       #0f1117;
+    --surface:  #171b25;
+    --surface2: #1e2435;
+    --border:   #2a3044;
+    --border2:  #3a4460;
+    --text:     #e2e8f5;
+    --muted:    #6b7a99;
+    --accent:   #4f8ef7;
+
+    --c-resource:  #1a3d2e;
+    --c-resource-b:#2a9c67;
+    --c-resource-t:#7ee8b4;
+
+    --c-craftable:  #1a2d4a;
+    --c-craftable-b:#2a6bc9;
+    --c-craftable-t:#7ab8f5;
+
+    --c-station:  #2a1f4a;
+    --c-station-b:#7a4fd4;
+    --c-station-t:#c4a3f7;
+
+    --c-gate:     #3d2a0a;
+    --c-gate-b:   #c47a1a;
+    --c-gate-t:   #f7c56a;
+
+    --c-milestone:#3d0f1a;
+    --c-milestone-b:#d44a7a;
+    --c-milestone-t:#f7a3c0;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Space Grotesk', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    user-select: none;
+  }
+
+  /* ── Top bar ── */
+  #topbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 16px;
+    height: 48px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    z-index: 100;
+  }
+
+  #topbar h1 {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-right: 8px;
+  }
+
+  .btn {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 12px;
+    font-weight: 500;
+    padding: 5px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--border2);
+    background: var(--surface2);
+    color: var(--text);
+    cursor: pointer;
+    transition: background .15s, border-color .15s;
+  }
+  .btn:hover { background: var(--border); border-color: var(--accent); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { background: #6aa0ff; }
+  .btn.danger { border-color: #c44; }
+  .btn.danger:hover { background: #400; border-color: #f66; }
+
+  #spacer { flex: 1; }
+
+  #mode-group {
+    display: flex;
+    gap: 4px;
+    background: var(--bg);
+    padding: 3px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+  #mode-group .btn {
+    border: none; background: transparent; padding: 4px 10px; border-radius: 5px;
+  }
+  #mode-group .btn.active { background: var(--surface2); color: var(--accent); }
+
+  /* ── Main layout ── */
+  #main {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* ── Canvas ── */
+  #canvas-wrap {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    cursor: default;
+  }
+
+  #canvas-wrap.mode-connect { cursor: crosshair; }
+  #canvas-wrap.mode-edit    { cursor: pointer; }
+  #canvas-wrap.mode-delete  { cursor: not-allowed; }
+
+  svg#canvas {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+  }
+
+  .node-group { cursor: grab; }
+  .node-group:active { cursor: grabbing; }
+  .node-group.mode-connect { cursor: crosshair; }
+  .node-group.mode-delete  { cursor: not-allowed; }
+
+  .node-rect {
+    stroke-width: 1.5;
+    rx: 8;
+  }
+  .node-label {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    pointer-events: none;
+  }
+  .node-sub {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    pointer-events: none;
+    opacity: .8;
+  }
+  .node-selected .node-rect {
+    stroke-width: 2.5 !important;
+    filter: drop-shadow(0 0 6px rgba(79,142,247,.6));
+  }
+
+  .edge-line {
+    stroke-width: 1.5;
+    fill: none;
+    marker-end: url(#arrowhead);
+    opacity: .75;
+    cursor: pointer;
+  }
+  .edge-line:hover { opacity: 1; stroke-width: 2.5; }
+  .edge-line.mode-delete { cursor: not-allowed; }
+
+  .edge-temp {
+    stroke: var(--accent);
+    stroke-width: 1.5;
+    fill: none;
+    stroke-dasharray: 6 4;
+    pointer-events: none;
+    marker-end: url(#arrowhead-accent);
+  }
+
+  /* ── Right panel ── */
+  #panel {
+    width: 260px;
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+
+  #panel-header {
+    padding: 12px 14px 10px;
+    border-bottom: 1px solid var(--border);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  #panel-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border2) transparent;
+  }
+
+  .field-group {
+    margin-bottom: 12px;
+  }
+  .field-group label {
+    display: block;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+  .field-group input,
+  .field-group select,
+  .field-group textarea {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border2);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    padding: 6px 9px;
+    outline: none;
+    transition: border-color .15s;
+  }
+  .field-group input:focus,
+  .field-group select:focus,
+  .field-group textarea:focus {
+    border-color: var(--accent);
+  }
+  .field-group textarea { resize: vertical; min-height: 60px; }
+
+  .field-row { display: flex; gap: 8px; }
+  .field-row .field-group { flex: 1; }
+
+  .badge-row { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+  .badge {
+    font-size: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    padding: 2px 7px;
+    border-radius: 4px;
+    border: 1px solid var(--border2);
+    background: var(--surface2);
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .badge .remove-req {
+    cursor: pointer;
+    color: #f66;
+    font-size: 11px;
+    line-height: 1;
+  }
+  .badge .remove-req:hover { color: #ff3333; }
+  .badge.qty { border-color: #c47a1a; color: #f7c56a; background: #3d2a0a; }
+  .badge.qty input {
+    width: 34px; background: transparent; border: none;
+    border-bottom: 1px solid #c47a1a; color: #f7c56a;
+    font-family: 'JetBrains Mono', monospace; font-size: 10px;
+    padding: 0 2px; outline: none; text-align: center;
+  }
+  .qty-add-row { display: flex; gap: 4px; margin-top: 6px; }
+  .qty-add-row input { flex: 1; }
+  .qty-add-row .btn { padding: 3px 8px; font-size: 11px; flex-shrink: 0; }
+  .edge-line.qty-edge { stroke-dasharray: 5 3; stroke: #c47a1a; opacity: .55; }
+
+  .no-selection {
+    color: var(--muted);
+    font-size: 12px;
+    text-align: center;
+    padding: 32px 12px;
+    line-height: 1.6;
+  }
+
+  #panel-footer {
+    padding: 10px 12px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    gap: 8px;
+  }
+  #panel-footer .btn { flex: 1; font-size: 11px; }
+
+  /* ── Legend ── */
+  #legend {
+    display: flex;
+    gap: 14px;
+    padding: 0 16px;
+    height: 32px;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    align-items: center;
+    flex-shrink: 0;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 10px;
+    color: var(--muted);
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+  }
+  .legend-dot {
+    width: 10px; height: 10px;
+    border-radius: 3px;
+    flex-shrink: 0;
+  }
+
+  /* ── Toast ── */
+  #toast {
+    position: fixed;
+    bottom: 48px;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: var(--surface2);
+    border: 1px solid var(--border2);
+    color: var(--text);
+    font-size: 12px;
+    padding: 8px 16px;
+    border-radius: 8px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .2s, transform .2s;
+    z-index: 999;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* ── Modal overlay ── */
+  #modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.6);
+    z-index: 500;
+    align-items: center;
+    justify-content: center;
+  }
+  #modal-overlay.show { display: flex; }
+  #modal {
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    border-radius: 12px;
+    width: 560px;
+    max-height: 88vh;
+    overflow-y: auto;
+    padding: 20px;
+  }
+  #modal h2 { font-size: 14px; margin-bottom: 16px; color: var(--text); }
+  .modal-footer { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+
+  /* ── Export modal textarea ── */
+  #export-text {
+    width: 100%;
+    height: 320px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    background: var(--bg);
+    border: 1px solid var(--border2);
+    border-radius: 8px;
+    color: #a8c4f5;
+    padding: 10px;
+    resize: none;
+    outline: none;
+  }
+</style>
+</head>
+<body>
+
+<!-- ── Top bar ───────────────────────────────────────── -->
+<div id="topbar">
+  <h1>Tech Tree Editor</h1>
+
+  <div id="mode-group">
+    <button class="btn active" id="mode-select-btn" onclick="setMode('select')" title="V — drag nodes">Select</button>
+    <button class="btn"        id="mode-edit-btn"   onclick="setMode('edit')"   title="E — click to edit">Edit</button>
+    <button class="btn"        id="mode-connect-btn" onclick="setMode('connect')" title="C — draw edges">Connect</button>
+    <button class="btn"        id="mode-delete-btn"  onclick="setMode('delete')"  title="D — delete">Delete</button>
+  </div>
+
+  <button class="btn" onclick="addNodeModal()">+ Add Node</button>
+  <button class="btn" onclick="autoLayout()">Auto Layout</button>
+  <button class="btn" onclick="saveAsDefault()">Save as Default</button>
+
+  <div id="spacer"></div>
+
+  <button class="btn" onclick="showExport('json')">Export JSON</button>
+  <button class="btn primary" onclick="showExport('training')">Export Training</button>
+  <button class="btn" onclick="importJSON()">Import JSON</button>
+</div>
+
+<!-- ── Main area ──────────────────────────────────────── -->
+<div id="main">
+
+  <!-- Canvas -->
+  <div id="canvas-wrap">
+    <svg id="canvas" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <marker id="arrowhead" markerWidth="8" markerHeight="8"
+                refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
+          <path d="M0,0 L0,6 L8,3 z" fill="#3a4460"/>
+        </marker>
+        <marker id="arrowhead-accent" markerWidth="8" markerHeight="8"
+                refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
+          <path d="M0,0 L0,6 L8,3 z" fill="#4f8ef7"/>
+        </marker>
+      </defs>
+      <g id="edges-layer"></g>
+      <g id="nodes-layer"></g>
+      <path id="temp-edge" class="edge-temp" style="display:none"/>
+    </svg>
+  </div>
+
+  <!-- Right panel -->
+  <div id="panel">
+    <div id="panel-header">Properties</div>
+    <div id="panel-body">
+      <div class="no-selection" id="no-sel">
+        Select a node to edit its properties.<br><br>
+        <span style="font-size:10px">
+          Select — drag nodes<br>
+          Connect — drag between nodes to add edge<br>
+          Delete — click node/edge to remove
+        </span>
+      </div>
+      <div id="prop-form" style="display:none">
+
+        <div class="field-group">
+          <label>ID</label>
+          <input id="prop-id" type="text"
+            onfocus="this.dataset.orig=this.value"
+            onblur="commitId(this.value, this.dataset.orig)"
+            onkeydown="if(event.key==='Enter')this.blur(); if(event.key==='Escape'){this.value=this.dataset.orig;this.blur();}"/>
+          <div id="prop-id-err" style="color:var(--color-text-danger,#f66);font-size:10px;margin-top:3px;display:none"></div>
+        </div>
+
+        <div class="field-group">
+          <label>Label</label>
+          <input id="prop-label" type="text"
+            oninput="updateProp('label',this.value)"
+            onblur="commitText('label')"
+            onkeydown="if(event.key==='Enter')this.blur()"/>
+        </div>
+
+        <div class="field-row">
+          <div class="field-group">
+            <label>Tier (0-9)</label>
+            <input id="prop-tier" type="number" min="0" max="9"
+              onfocus="this.dataset.orig=this.value"
+              onblur="commitNum('tier',this.value,this.dataset.orig)"
+              onkeydown="if(event.key==='Enter')this.blur(); if(event.key==='Escape'){this.value=this.dataset.orig;this.blur();}"/>
+          </div>
+          <div class="field-group">
+            <label>Reward</label>
+            <input id="prop-reward" type="number" step="0.1"
+              onfocus="this.dataset.orig=this.value"
+              onblur="commitNum('reward',this.value,this.dataset.orig)"
+              onkeydown="if(event.key==='Enter')this.blur(); if(event.key==='Escape'){this.value=this.dataset.orig;this.blur();}"/>
+          </div>
+        </div>
+
+        <div class="field-group">
+          <label>Type</label>
+          <select id="prop-type" onchange="updateProp('type',this.value); renderAll()">
+            <option value="resource">resource</option>
+            <option value="craftable">craftable</option>
+            <option value="station">station</option>
+            <option value="gate">gate</option>
+            <option value="milestone">milestone</option>
+          </select>
+        </div>
+
+        <div class="field-group">
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+            <input type="checkbox" id="prop-oneshot"
+              onchange="updateProp('one_shot',this.checked)"
+              style="width:auto;margin:0"/>
+            One-shot (reward fires once per episode)
+          </label>
+        </div>
+
+        <div class="field-group">
+          <label>Notes</label>
+          <textarea id="prop-notes"
+            oninput="updateProp('notes',this.value)"
+            onblur="commitText('notes')"></textarea>
+        </div>
+
+        <div class="field-group">
+          <label>Requires <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">(binary — must exist)</span></label>
+          <div class="badge-row" id="req-badges"></div>
+          <div class="qty-add-row" style="margin-top:6px">
+            <input id="req-add-id" placeholder="node_id" style="min-width:0"
+              onkeydown="if(event.key==='Enter')addReq()"
+              list="node-id-list"/>
+            <button class="btn" onclick="addReq()">+ Add</button>
+          </div>
+        </div>
+
+        <div class="field-group">
+          <label>Quantity requires <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">(need N in inventory)</span></label>
+          <div class="badge-row" id="qty-badges"></div>
+          <div class="qty-add-row">
+            <input id="qty-add-id"  placeholder="item_id" style="min-width:0"
+              onkeydown="if(event.key==='Enter')addQtyReq()"
+              list="node-id-list"/>
+            <input id="qty-add-qty" placeholder="qty" type="number" min="1" value="1" style="width:44px"/>
+            <button class="btn" onclick="addQtyReq()">+ Add</button>
+          </div>
+        </div>
+
+        <div id="validation-box" style="display:none;margin-top:10px;padding:8px 10px;border-radius:6px;border:1px solid #c44;background:#300;font-size:11px;font-family:'JetBrains Mono',monospace;color:#f99;line-height:1.6"></div>
+
+      </div>
+    </div>
+    <div id="panel-footer" style="display:none">
+      <button class="btn" onclick="undoAction()" id="undo-btn" title="Ctrl+Z">↩ Undo</button>
+      <button class="btn" onclick="duplicateSelected()">Copy</button>
+      <button class="btn danger" onclick="deleteSelected()">Delete</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Legend ──────────────────────────────────────────── -->
+<div id="legend">
+  <div class="legend-item"><div class="legend-dot" style="background:#2a9c67"></div>Resource</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#2a6bc9"></div>Craftable</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#7a4fd4"></div>Station</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#c47a1a"></div>Gate</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#d44a7a"></div>Milestone</div>
+  <span style="margin-left:auto;font-size:10px;color:var(--muted)">Scroll to zoom · Drag to pan · Double-click node to edit</span>
+</div>
+
+<!-- ── Toast ──────────────────────────────────────────── -->
+<div id="toast"></div>
+
+<!-- ── Modal ──────────────────────────────────────────── -->
+<div id="modal-overlay">
+  <div id="modal">
+    <h2 id="modal-title">Add Node</h2>
+    <div id="modal-content"></div>
+    <div class="modal-footer" id="modal-footer"></div>
+  </div>
+</div>
+
+<input type="file" id="file-input" accept=".json" style="display:none"/>
+<datalist id="node-id-list"></datalist>
+
+<script src="tech_tree_seed.js"></script>
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+
+const NODE_W = 140, NODE_H = 52;
+
+const TYPE_COLORS = {
+  resource:  { bg:'#1a3d2e', border:'#2a9c67', text:'#7ee8b4' },
+  craftable: { bg:'#1a2d4a', border:'#2a6bc9', text:'#7ab8f5' },
+  station:   { bg:'#2a1f4a', border:'#7a4fd4', text:'#c4a3f7' },
+  gate:      { bg:'#3d2a0a', border:'#c47a1a', text:'#f7c56a' },
+  milestone: { bg:'#3d0f1a', border:'#d44a7a', text:'#f7a3c0' },
+};
+
+let nodes = {};  // id → { id, label, tier, type, reward, requires, quantity_requires, one_shot, pos, notes }
+let edges = [];  // [{ from, to }]
+let selectedId = null;
+let mode = 'select';
+
+// Undo stack — stores deep-copied snapshots
+const undoStack = [];
+const UNDO_LIMIT = 40;
+function snapshot() {
+  undoStack.push(JSON.stringify({ nodes, edges }));
+  if (undoStack.length > UNDO_LIMIT) undoStack.shift();
+}
+function undoAction() {
+  if (!undoStack.length) { toast('Nothing to undo'); return; }
+  const prev = JSON.parse(undoStack.pop());
+  nodes = prev.nodes;
+  edges = prev.edges;
+  if (selectedId && !nodes[selectedId]) select(null);
+  else if (selectedId) showPanel(nodes[selectedId]);
+  renderAll();
+  toast('Undone');
+}
+
+// Pan & zoom
+let pan = { x: 40, y: 40 };
+let zoom = 1.0;
+let isPanning = false;
+let panStart = null;
+
+// Edge drawing
+let connectStart = null; // node id
+let mousePos = { x: 0, y: 0 };
+
+// Drag
+let dragging = null;     // { id, ox, oy }
+
+// ── Helpers ──────────────────────────────────────────────────────────────
+
+const $ = id => document.getElementById(id);
+const svg = $('canvas');
+
+function toast(msg) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(t._t);
+  t._t = setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+function worldToScreen(wx, wy) {
+  return { x: wx * zoom + pan.x, y: wy * zoom + pan.y };
+}
+function screenToWorld(sx, sy) {
+  return { x: (sx - pan.x) / zoom, y: (sy - pan.y) / zoom };
+}
+
+function svgPt(e) {
+  const r = svg.getBoundingClientRect();
+  return screenToWorld(e.clientX - r.left, e.clientY - r.top);
+}
+
+function nodeCenter(node) {
+  return { x: node.pos[0] + NODE_W / 2, y: node.pos[1] + NODE_H / 2 };
+}
+
+function nodeEdgePoint(node, targetX, targetY) {
+  const cx = node.pos[0] + NODE_W / 2;
+  const cy = node.pos[1] + NODE_H / 2;
+  const dx = targetX - cx, dy = targetY - cy;
+  const scaleX = (NODE_W / 2) / Math.abs(dx || 1);
+  const scaleY = (NODE_H / 2) / Math.abs(dy || 1);
+  const scale = Math.min(scaleX, scaleY);
+  return { x: cx + dx * scale, y: cy + dy * scale };
+}
+
+// ── SVG rendering ─────────────────────────────────────────────────────────
+
+function makeSVGEl(tag, attrs) {
+  const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const [k,v] of Object.entries(attrs)) el.setAttribute(k, v);
+  return el;
+}
+
+function renderAll() {
+  renderEdges();
+  renderNodes();
+}
+
+function renderNodes() {
+  const layer = $('nodes-layer');
+  layer.innerHTML = '';
+  for (const n of Object.values(nodes)) {
+    const g = renderNode(n);
+    layer.appendChild(g);
+  }
+}
+
+function renderNode(node) {
+  const c = TYPE_COLORS[node.type] || TYPE_COLORS.craftable;
+  const {x, y} = worldToScreen(node.pos[0], node.pos[1]);
+  const w = NODE_W * zoom, h = NODE_H * zoom;
+
+  const g = makeSVGEl('g', {
+    class: 'node-group' + (node.id === selectedId ? ' node-selected' : ''),
+    'data-id': node.id,
+    transform: `translate(${x},${y})`
+  });
+
+  const rect = makeSVGEl('rect', {
+    class: 'node-rect',
+    width: w, height: h, rx: 8 * zoom,
+    fill: c.bg, stroke: c.border
+  });
+  g.appendChild(rect);
+
+  const tierBadge = makeSVGEl('rect', {
+    x: 0, y: 0,
+    width: 18 * zoom, height: 18 * zoom,
+    rx: 4 * zoom,
+    fill: c.border, opacity: .35
+  });
+  g.appendChild(tierBadge);
+
+  const tierText = makeSVGEl('text', {
+    x: 9 * zoom, y: 10 * zoom,
+    'text-anchor': 'middle',
+    'dominant-baseline': 'central',
+    fill: c.text,
+    'font-family': 'JetBrains Mono',
+    'font-size': 9 * zoom,
+    'font-weight': '600',
+    'pointer-events': 'none'
+  });
+  tierText.textContent = node.tier;
+  g.appendChild(tierText);
+
+  const label = makeSVGEl('text', {
+    class: 'node-label',
+    x: w / 2, y: h * .38,
+    'text-anchor': 'middle',
+    'dominant-baseline': 'central',
+    fill: c.text,
+    'font-size': Math.max(9, 12 * zoom),
+    'pointer-events': 'none'
+  });
+  label.textContent = truncate(node.label, 18);
+  g.appendChild(label);
+
+  const sub = makeSVGEl('text', {
+    class: 'node-sub',
+    x: w / 2, y: h * .7,
+    'text-anchor': 'middle',
+    'dominant-baseline': 'central',
+    fill: c.border,
+    'font-size': Math.max(8, 10 * zoom),
+    'pointer-events': 'none'
+  });
+  sub.textContent = `r=${node.reward}  t${node.tier}`;
+  g.appendChild(sub);
+
+  if (node.one_shot) {
+    const dot = makeSVGEl('circle', {
+      cx: w - 7 * zoom, cy: 7 * zoom, r: 3 * zoom,
+      fill: '#f7c56a'
+    });
+    g.appendChild(dot);
+  }
+
+  // Events
+  g.addEventListener('mousedown', e => onNodeMouseDown(e, node.id));
+  g.addEventListener('click',     e => onNodeClick(e, node.id));
+  g.addEventListener('dblclick',  e => onNodeDblClick(e, node.id));
+
+  return g;
+}
+
+function renderEdges() {
+  const layer = $('edges-layer');
+  layer.innerHTML = '';
+
+  // Build edge list: binary requires (solid) + quantity_requires (dashed amber)
+  const allEdges = [
+    ...edges.map(e => ({ ...e, isQty: false })),
+    ...Object.values(nodes).flatMap(n =>
+      Object.keys(n.quantity_requires || {}).map(reqId => ({
+        from: reqId, to: n.id, isQty: true,
+        qty: n.quantity_requires[reqId]
+      }))
+    )
+  ];
+
+  for (const { from, to, isQty, qty } of allEdges) {
+    const fn = nodes[from], tn = nodes[to];
+    if (!fn || !tn) continue;
+
+    const fc = nodeCenter(fn), tc = nodeCenter(tn);
+    const fe = worldToScreen(...Object.values(nodeEdgePoint(fn, tc.x, tc.y)));
+    const te = worldToScreen(...Object.values(nodeEdgePoint(tn, fc.x, fc.y)));
+
+    const mx = (fe.x + te.x) / 2;
+    const my = (fe.y + te.y) / 2 - 20;
+
+    const path = makeSVGEl('path', {
+      class: 'edge-line' + (isQty ? ' qty-edge' : '') + (mode === 'delete' ? ' mode-delete' : ''),
+      d: `M${fe.x},${fe.y} Q${mx},${my} ${te.x},${te.y}`,
+      stroke: isQty ? '#c47a1a' : '#3a4460'
+    });
+
+    if (isQty && qty) {
+      // qty label on the edge midpoint
+      const lx = (fe.x + mx + te.x) / 3;
+      const ly = (fe.y + my + te.y) / 3 - 4;
+      const label = makeSVGEl('text', {
+        x: lx, y: ly,
+        'text-anchor': 'middle',
+        'font-family': 'JetBrains Mono',
+        'font-size': Math.max(8, 9 * zoom),
+        fill: '#c47a1a',
+        'pointer-events': 'none',
+        opacity: '0.9'
+      });
+      label.textContent = `×${qty}`;
+      layer.appendChild(label);
+    }
+
+    if (!isQty) {
+      path.addEventListener('click', e => onEdgeClick(e, from, to));
+    }
+    layer.appendChild(path);
+  }
+}
+
+function truncate(str, n) {
+  return str.length > n ? str.slice(0, n - 1) + '…' : str;
+}
+
+// ── Event handlers ────────────────────────────────────────────────────────
+
+let lastMouseDown = 0;
+
+svg.addEventListener('mousedown', e => {
+  if (e.target === svg || e.target.id === 'canvas') {
+    if (mode === 'select') {
+      isPanning = true;
+      panStart = { x: e.clientX - pan.x, y: e.clientY - pan.y };
+    }
+    select(null);
+  }
+});
+
+svg.addEventListener('mousemove', e => {
+  const r = svg.getBoundingClientRect();
+  const sx = e.clientX - r.left, sy = e.clientY - r.top;
+  mousePos = screenToWorld(sx, sy);
+
+  if (isPanning && panStart) {
+    pan.x = e.clientX - panStart.x;
+    pan.y = e.clientY - panStart.y;
+    renderAll();
+    return;
+  }
+
+  if (dragging) {
+    nodes[dragging.id].pos = [
+      mousePos.x - dragging.ox,
+      mousePos.y - dragging.oy
+    ];
+    renderAll();
+    return;
+  }
+
+  if (connectStart) {
+    updateTempEdge(mousePos.x, mousePos.y);
+  }
+});
+
+svg.addEventListener('mouseup', e => {
+  isPanning = false;
+  panStart = null;
+  if (dragging) {
+    dragging = null;
+    renderAll();
+  }
+});
+
+svg.addEventListener('wheel', e => {
+  e.preventDefault();
+  const r = svg.getBoundingClientRect();
+  const mx = e.clientX - r.left, my = e.clientY - r.top;
+  const factor = e.deltaY < 0 ? 1.1 : 0.9;
+  const newZoom = Math.min(Math.max(zoom * factor, 0.2), 3);
+  pan.x = mx - (mx - pan.x) * (newZoom / zoom);
+  pan.y = my - (my - pan.y) * (newZoom / zoom);
+  zoom = newZoom;
+  renderAll();
+}, { passive: false });
+
+function onNodeMouseDown(e, id) {
+  e.stopPropagation();
+  if (mode === 'select') {
+    const wp = svgPt(e);
+    dragging = {
+      id,
+      ox: wp.x - nodes[id].pos[0],
+      oy: wp.y - nodes[id].pos[1]
+    };
+  // edit mode: no drag, click handler does the work 
+  }
+}
+
+function onNodeClick(e, id) {
+  e.stopPropagation();
+  if (mode === 'edit') {
+    select(id);
+    openEditModal(id);
+  } else if (mode === 'select') {
+    select(id);
+  } else if (mode === 'connect') {
+    if (!connectStart) {
+      connectStart = id;
+      const c = nodeCenter(nodes[id]);
+      const sp = worldToScreen(c.x, c.y);
+      const te = $('temp-edge');
+      te.style.display = '';
+      te.setAttribute('d', `M${sp.x},${sp.y} L${sp.x},${sp.y}`);
+    } else if (connectStart === id) {
+      connectStart = null;
+      $('temp-edge').style.display = 'none';
+    } else {
+      addEdge(connectStart, id);
+      connectStart = null;
+      $('temp-edge').style.display = 'none';
+    }
+  } else if (mode === 'delete') {
+    deleteNode(id);
+  }
+}
+
+function onNodeDblClick(e, id) {
+  e.stopPropagation();
+  if (mode !== 'select') return;
+  select(id);
+  openEditModal(id);
+}
+
+svg.addEventListener('click', e => {
+  if (connectStart && !e.target.closest('[data-id]')) {
+    connectStart = null;
+    $('temp-edge').style.display = 'none';
+  }
+});
+
+function onEdgeClick(e, from, to) {
+  e.stopPropagation();
+  if (mode === 'delete') {
+    removeEdge(from, to);
+  }
+}
+
+function updateTempEdge(wx, wy) {
+  if (!connectStart) return;
+  const n = nodes[connectStart];
+  if (!n) return;
+  const c = nodeCenter(n);
+  const sp = worldToScreen(c.x, c.y);
+  const ep = worldToScreen(wx, wy);
+  const mx = (sp.x + ep.x) / 2, my = (sp.y + ep.y) / 2 - 20;
+  $('temp-edge').setAttribute('d', `M${sp.x},${sp.y} Q${mx},${my} ${ep.x},${ep.y}`);
+}
+
+// ── Selection & panel ─────────────────────────────────────────────────────
+
+function select(id) {
+  selectedId = id;
+  renderAll();
+  if (id) {
+    showPanel(nodes[id]);
+  } else {
+    $('no-sel').style.display = '';
+    $('prop-form').style.display = 'none';
+    $('panel-footer').style.display = 'none';
+  }
+}
+
+function showPanel(node) {
+  $('no-sel').style.display = 'none';
+  $('prop-form').style.display = '';
+  $('panel-footer').style.display = '';
+  $('prop-id').value        = node.id;
+  $('prop-id-err').style.display = 'none';
+  $('prop-label').value     = node.label;
+  $('prop-tier').value      = node.tier;
+  $('prop-reward').value    = node.reward;
+  $('prop-type').value      = node.type;
+  $('prop-oneshot').checked = !!node.one_shot;
+  $('prop-notes').value     = node.notes || '';
+  renderReqBadges(node);
+  renderQtyBadges(node);
+  updateDatalist();
+  runValidation();
+  // Focus label so user can immediately start typing
+  setTimeout(() => $('prop-label').select(), 50);
+}
+
+function renderReqBadges(node) {
+  const row = $('req-badges');
+  row.innerHTML = '';
+  for (const req of (node.requires || [])) {
+    const b = document.createElement('div');
+    b.className = 'badge';
+    b.innerHTML = `${req} <span class="remove-req" onclick="removeReq('${node.id}','${req}')">×</span>`;
+    row.appendChild(b);
+  }
+}
+
+function renderQtyBadges(node) {
+  const row = $('qty-badges');
+  row.innerHTML = '';
+  const qty = node.quantity_requires || {};
+  for (const [reqId, count] of Object.entries(qty)) {
+    const b = document.createElement('div');
+    b.className = 'badge qty';
+    b.innerHTML = `${reqId}:&nbsp;<input type="number" min="1" value="${count}"
+      onchange="updateQtyReq('${node.id}','${reqId}',+this.value)"
+      onclick="event.stopPropagation()"/>
+      <span class="remove-req" onclick="removeQtyReq('${node.id}','${reqId}')">×</span>`;
+    row.appendChild(b);
+  }
+}
+
+function addQtyReq() {
+  if (!selectedId) return;
+  const idInput  = $('qty-add-id');
+  const qtyInput = $('qty-add-qty');
+  const reqId = idInput.value.trim();
+  const qty   = parseInt(qtyInput.value) || 1;
+  if (!reqId) { toast('Enter an item id'); return; }
+  snapshot();
+  const n = nodes[selectedId];
+  if (!n.quantity_requires) n.quantity_requires = {};
+  n.quantity_requires[reqId] = qty;
+  idInput.value = '';
+  qtyInput.value = '1';
+  renderQtyBadges(n);
+  renderAll();
+  runValidation();
+  toast(`qty: ${reqId} ×${qty}`);
+}
+
+function updateQtyReq(nodeId, reqId, newQty) {
+  const n = nodes[nodeId];
+  if (!n || !n.quantity_requires) return;
+  if (newQty < 1) { removeQtyReq(nodeId, reqId); return; }
+  snapshot();
+  n.quantity_requires[reqId] = newQty;
+  renderAll();
+  runValidation();
+}
+
+function removeQtyReq(nodeId, reqId) {
+  const n = nodes[nodeId];
+  if (!n || !n.quantity_requires) return;
+  snapshot();
+  delete n.quantity_requires[reqId];
+  renderAll();
+  renderQtyBadges(n);
+  runValidation();
+}
+
+function removeReq(nodeId, reqId) {
+  const n = nodes[nodeId];
+  if (!n) return;
+  snapshot();
+  n.requires = n.requires.filter(r => r !== reqId);
+  edges = edges.filter(e => !(e.from === reqId && e.to === nodeId));
+  renderAll();
+  renderReqBadges(n);
+  runValidation();
+}
+
+function commitId(newVal, origVal) {
+  const errEl = $('prop-id-err');
+  errEl.style.display = 'none';
+  if (!selectedId || !nodes[selectedId]) return;
+  const newId = newVal.trim().replace(/\s+/g, '_').toLowerCase();
+  if (!newId || newId === selectedId) { $('prop-id').value = selectedId; return; }
+  if (nodes[newId]) {
+    errEl.textContent = `"${newId}" already exists`;
+    errEl.style.display = '';
+    $('prop-id').value = selectedId;
+    return;
+  }
+  snapshot();
+  const oldId = selectedId;
+  nodes[newId] = { ...nodes[oldId], id: newId };
+  delete nodes[oldId];
+  edges = edges.map(e => ({
+    from: e.from === oldId ? newId : e.from,
+    to:   e.to   === oldId ? newId : e.to,
+  }));
+  for (const n of Object.values(nodes)) {
+    n.requires = n.requires.map(r => r === oldId ? newId : r);
+    if (n.quantity_requires && oldId in n.quantity_requires) {
+      n.quantity_requires[newId] = n.quantity_requires[oldId];
+      delete n.quantity_requires[oldId];
+    }
+  }
+  selectedId = newId;
+  $('prop-id').value = newId;
+  updateDatalist();
+  renderAll();
+  runValidation();
+  toast(`Renamed → ${newId}`);
+}
+
+function commitNum(key, newVal, origVal) {
+  if (!selectedId || !nodes[selectedId]) return;
+  const v = parseFloat(newVal);
+  if (isNaN(v)) { $(`prop-${key}`).value = origVal; return; }
+  snapshot();
+  nodes[selectedId][key] = key === 'tier' ? Math.round(v) : v;
+  renderAll();
+  runValidation();
+}
+
+function updateProp(key, value) {
+  if (!selectedId || !nodes[selectedId]) return;
+  // For text fields (label, notes) — update live but don't snapshot/re-render
+  // on every keystroke. Canvas re-render on blur via commitText().
+  nodes[selectedId][key] = value;
+  if (key === 'type') { snapshot(); renderAll(); }
+  if (key === 'one_shot') { snapshot(); renderAll(); }
+}
+
+function commitText(key) {
+  // Called onblur for label and notes — take snapshot and re-render once
+  if (!selectedId || !nodes[selectedId]) return;
+  snapshot();
+  renderAll();
+  runValidation();
+}
+
+function addReq() {
+  if (!selectedId) return;
+  const input = $('req-add-id');
+  const reqId = input.value.trim();
+  if (!reqId) { toast('Enter a node id'); return; }
+  if (!nodes[reqId]) { toast(`Node "${reqId}" doesn't exist`); return; }
+  const n = nodes[selectedId];
+  if (n.requires.includes(reqId)) { toast('Already a prerequisite'); input.value=''; return; }
+  if (reqId === selectedId) { toast('A node cannot require itself'); return; }
+  snapshot();
+  n.requires.push(reqId);
+  if (!edges.some(e => e.from === reqId && e.to === selectedId)) {
+    edges.push({ from: reqId, to: selectedId });
+  }
+  input.value = '';
+  renderAll();
+  renderReqBadges(n);
+  runValidation();
+  toast(`Added req: ${reqId}`);
+}
+
+function updateDatalist() {
+  const dl = $('node-id-list');
+  dl.innerHTML = '';
+  for (const id of Object.keys(nodes).sort()) {
+    const opt = document.createElement('option');
+    opt.value = id;
+    dl.appendChild(opt);
+  }
+}
+
+function runValidation() {
+  const box = $('validation-box');
+  if (!selectedId || !nodes[selectedId]) { box.style.display = 'none'; return; }
+
+  const errors = [];
+  const n = nodes[selectedId];
+  const allIds = Object.keys(nodes);
+
+  // Check requires references exist
+  for (const req of n.requires) {
+    if (!nodes[req]) errors.push(`requires "${req}" — node not found`);
+  }
+  // Check quantity_requires references exist
+  for (const [req, qty] of Object.entries(n.quantity_requires || {})) {
+    if (!nodes[req]) errors.push(`qty_requires "${req}" — node not found`);
+    if (!Number.isInteger(qty) || qty < 1) errors.push(`qty_requires "${req}" — must be a positive integer`);
+  }
+  // Check for self-cycle
+  if (n.requires.includes(selectedId)) errors.push('Node requires itself');
+  // Gates need at least one dependency
+  if ((n.type === 'gate' || n.type === 'milestone') && !n.requires.length && !Object.keys(n.quantity_requires || {}).length) {
+    errors.push('Gates and milestones need at least one prerequisite');
+  }
+  // Reward sanity
+  if (n.reward < 0) errors.push('Reward should be ≥ 0');
+
+  if (errors.length) {
+    box.style.display = '';
+    box.innerHTML = errors.map(e => `⚠ ${e}`).join('<br>');
+  } else {
+    box.style.display = 'none';
+  }
+}
+
+// ── Node operations ───────────────────────────────────────────────────────
+
+function addEdge(from, to) {
+  if (edges.some(e => e.from === from && e.to === to)) { toast('Edge already exists'); return; }
+  if (from === to) return;
+  snapshot();
+  edges.push({ from, to });
+  if (!nodes[to].requires.includes(from)) nodes[to].requires.push(from);
+  renderAll();
+  if (selectedId === to) { renderReqBadges(nodes[to]); runValidation(); }
+  toast(`Edge: ${from} → ${to}`);
+}
+
+function removeEdge(from, to) {
+  snapshot();
+  edges = edges.filter(e => !(e.from === from && e.to === to));
+  if (nodes[to]) nodes[to].requires = nodes[to].requires.filter(r => r !== from);
+  renderAll();
+  if (selectedId === to) { renderReqBadges(nodes[to]); runValidation(); }
+  toast('Edge removed');
+}
+
+function deleteNode(id) {
+  snapshot();
+  delete nodes[id];
+  edges = edges.filter(e => e.from !== id && e.to !== id);
+  for (const n of Object.values(nodes)) {
+    n.requires = n.requires.filter(r => r !== id);
+    if (n.quantity_requires) delete n.quantity_requires[id];
+  }
+  if (selectedId === id) select(null);
+  updateDatalist();
+  renderAll();
+  toast(`Node '${id}' deleted`);
+}
+
+function deleteSelected() { if (selectedId) deleteNode(selectedId); }
+
+function duplicateSelected() {
+  if (!selectedId) return;
+  snapshot();
+  const src = nodes[selectedId];
+  const newId = src.id + '_copy';
+  nodes[newId] = { ...JSON.parse(JSON.stringify(src)), id: newId, pos: [src.pos[0] + 170, src.pos[1] + 20] };
+  updateDatalist();
+  select(newId);
+  renderAll();
+  toast('Duplicated');
+}
+
+// ── Modes ─────────────────────────────────────────────────────────────────
+
+function setMode(m) {
+  mode = m;
+  connectStart = null;
+  $('temp-edge').style.display = 'none';
+  $('canvas-wrap').className = m === 'select' ? '' : `mode-${m}`;
+  for (const btn of document.querySelectorAll('#mode-group .btn')) {
+    btn.classList.toggle('active', btn.id === `mode-${m}-btn`);
+  }
+  renderAll();
+}
+
+// ── Auto layout ───────────────────────────────────────────────────────────
+
+function autoLayout() {
+  const byTier = {};
+  for (const n of Object.values(nodes)) {
+    if (!byTier[n.tier]) byTier[n.tier] = [];
+    byTier[n.tier].push(n);
+  }
+  const TIER_H = 140, COL_W = 170, PAD_X = 60, PAD_Y = 60;
+  for (const [tier, ns] of Object.entries(byTier)) {
+    const total = ns.length;
+    ns.forEach((n, i) => {
+      n.pos = [PAD_X + i * COL_W, PAD_Y + Number(tier) * TIER_H];
+    });
+  }
+  pan = { x: 40, y: 40 };
+  zoom = 0.75;
+  renderAll();
+  toast('Layout applied');
+}
+
+function saveAsDefault() {
+  const nodeList = Object.values(nodes);
+  localStorage.setItem('hrl_seed_data', JSON.stringify({ nodes: nodeList, edges }));
+  toast('Saved as default — reloads with this data');
+}
+
+// ── Add node modal ────────────────────────────────────────────────────────
+
+function addNodeModal() {
+  $('modal-title').textContent = 'Add Node';
+  $('modal-content').innerHTML = `
+    <div class="field-group"><label>ID (snake_case)</label>
+      <input id="new-id" placeholder="iron_sword"/></div>
+    <div class="field-group"><label>Label</label>
+      <input id="new-label" placeholder="Iron sword"/></div>
+    <div class="field-row">
+      <div class="field-group"><label>Tier</label>
+        <input id="new-tier" type="number" min="0" max="9" value="3"/></div>
+      <div class="field-group"><label>Reward</label>
+        <input id="new-reward" type="number" step="0.1" value="1.0"/></div>
+    </div>
+    <div class="field-group"><label>Type</label>
+      <select id="new-type">
+        <option>resource</option><option selected>craftable</option>
+        <option>station</option><option>gate</option><option>milestone</option>
+      </select></div>
+    <div class="field-group"><label>
+      <input type="checkbox" id="new-oneshot" style="width:auto;margin-right:5px"/>
+      One-shot</label></div>
+    <div class="field-group"><label>Requires (comma-sep IDs)</label>
+      <input id="new-req" placeholder="crafting_table, wooden_pickaxe"/></div>
+    <div class="field-group"><label>Quantity requires <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(id:qty pairs, space-sep)</span></label>
+      <input id="new-qty" placeholder="iron_ingot:3 sticks:2"/></div>
+    <div class="field-group"><label>Notes</label>
+      <textarea id="new-notes"></textarea></div>
+  `;
+  $('modal-footer').innerHTML = `
+    <button class="btn" onclick="closeModal()">Cancel</button>
+    <button class="btn primary" onclick="confirmAddNode()">Add Node</button>
+  `;
+  $('modal-overlay').classList.add('show');
+  setTimeout(() => $('new-id').focus(), 50);
+}
+
+function confirmAddNode() {
+  const id = $('new-id').value.trim().replace(/\s+/g,'_').toLowerCase();
+  if (!id) { toast('ID required'); return; }
+  if (nodes[id]) { toast('ID already exists'); return; }
+  const label   = $('new-label').value.trim() || id;
+  const tier    = +$('new-tier').value;
+  const reward  = +$('new-reward').value;
+  const type    = $('new-type').value;
+  const oneshot = $('new-oneshot').checked;
+  const reqRaw  = $('new-req').value;
+  const requires = reqRaw ? reqRaw.split(',').map(s=>s.trim()).filter(Boolean) : [];
+  const qtyRaw  = $('new-qty').value.trim();
+  const quantity_requires = {};
+  for (const part of qtyRaw.split(/\s+/).filter(Boolean)) {
+    const [k, v] = part.split(':');
+    if (k && v) quantity_requires[k.trim()] = parseInt(v) || 1;
+  }
+  const notes   = $('new-notes').value.trim();
+
+  // Place in visible area
+  const cx = (svg.clientWidth / 2 - pan.x) / zoom;
+  const cy = (svg.clientHeight / 2 - pan.y) / zoom;
+
+  nodes[id] = { id, label, tier, type, reward, requires, quantity_requires, one_shot: oneshot, pos: [cx - NODE_W/2, cy - NODE_H/2], notes };
+
+  // Add edges for binary requires
+  for (const req of requires) {
+    if (nodes[req] && !edges.some(e => e.from === req && e.to === id)) {
+      edges.push({ from: req, to: id });
+    }
+  }
+
+  closeModal();
+  updateDatalist();
+  select(id);
+  renderAll();
+  toast(`Node '${id}' added`);
+}
+
+function closeModal() {
+  $('modal-overlay').classList.remove('show');
+}
+$('modal-overlay').addEventListener('click', e => { if (e.target === $('modal-overlay')) closeModal(); });
+
+// ── Edit node modal (double-click) ────────────────────────────────────────
+
+function openEditModal(id) {
+  const n = nodes[id];
+  if (!n) return;
+
+  $('modal-title').textContent = `Edit — ${n.label || n.id}`;
+
+  const allIds = Object.keys(nodes).filter(k => k !== id).sort();
+  const idOptions = allIds.map(k => `<option value="${k}">`).join('');
+
+  const reqBadgesHtml = (n.requires || []).map(r =>
+    `<span class="badge" style="cursor:default">${r}
+      <span class="remove-req" onclick="modalRemoveReq('${r}')">×</span></span>`
+  ).join('');
+
+  const qtyBadgesHtml = Object.entries(n.quantity_requires || {}).map(([k, v]) =>
+    `<span class="badge qty" style="cursor:default">${k}:
+      <input type="number" min="1" value="${v}" style="width:36px"
+        onchange="modalUpdateQty('${k}',+this.value)"
+        onclick="event.stopPropagation()"/>
+      <span class="remove-req" onclick="modalRemoveQty('${k}')">×</span></span>`
+  ).join('');
+
+  $('modal-content').innerHTML = `
+    <datalist id="modal-id-list">${idOptions}</datalist>
+
+    <div class="field-row">
+      <div class="field-group" style="flex:2">
+        <label>Label</label>
+        <input id="em-label" value="${escHtml(n.label)}"
+          oninput="modalLive('label',this.value)"
+          onkeydown="if(event.key==='Enter')$('em-reward').focus()"/>
+      </div>
+      <div class="field-group" style="flex:1">
+        <label>ID</label>
+        <input id="em-id" value="${escHtml(n.id)}"
+          onfocus="this.dataset.orig=this.value"
+          onblur="modalCommitId(this.value,this.dataset.orig)"
+          onkeydown="if(event.key==='Enter')this.blur()"/>
+        <div id="em-id-err" style="color:#f66;font-size:10px;margin-top:2px;display:none"></div>
+      </div>
+    </div>
+
+    <div class="field-row">
+      <div class="field-group">
+        <label>Tier (0–9)</label>
+        <input id="em-tier" type="number" min="0" max="9" value="${n.tier}"
+          onfocus="this.dataset.orig=this.value"
+          onblur="modalCommitNum('tier',this.value,this.dataset.orig)"
+          onkeydown="if(event.key==='Enter')this.blur()"/>
+      </div>
+      <div class="field-group">
+        <label>Reward</label>
+        <input id="em-reward" type="number" step="0.1" value="${n.reward}"
+          onfocus="this.dataset.orig=this.value"
+          onblur="modalCommitNum('reward',this.value,this.dataset.orig)"
+          onkeydown="if(event.key==='Enter')this.blur()"/>
+      </div>
+      <div class="field-group">
+        <label>Type</label>
+        <select id="em-type" onchange="modalLive('type',this.value); renderAll()">
+          ${['resource','craftable','station','gate','milestone'].map(t =>
+            `<option${t===n.type?' selected':''}>${t}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+
+    <div class="field-group">
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" id="em-oneshot" ${n.one_shot?'checked':''}
+          onchange="modalLive('one_shot',this.checked); renderAll()"
+          style="width:auto;margin:0"/>
+        One-shot (reward fires once per episode)
+      </label>
+    </div>
+
+    <div class="field-group">
+      <label>Notes</label>
+      <textarea id="em-notes" style="min-height:50px"
+        oninput="modalLive('notes',this.value)">${escHtml(n.notes||'')}</textarea>
+    </div>
+
+    <div class="field-row" style="gap:12px;align-items:flex-start">
+      <div class="field-group" style="flex:1">
+        <label>Requires <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(binary)</span></label>
+        <div class="badge-row" id="em-req-badges">${reqBadgesHtml}</div>
+        <div class="qty-add-row" style="margin-top:6px">
+          <input id="em-req-add" placeholder="node_id" list="modal-id-list"
+            onkeydown="if(event.key==='Enter')modalAddReq()"/>
+          <button class="btn" onclick="modalAddReq()">+</button>
+        </div>
+      </div>
+      <div class="field-group" style="flex:1">
+        <label>Qty requires <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(need N)</span></label>
+        <div class="badge-row" id="em-qty-badges">${qtyBadgesHtml}</div>
+        <div class="qty-add-row" style="margin-top:6px">
+          <input id="em-qty-id"  placeholder="item_id" list="modal-id-list"
+            onkeydown="if(event.key==='Enter')modalAddQty()"/>
+          <input id="em-qty-n"   type="number" min="1" value="1" style="width:44px"/>
+          <button class="btn" onclick="modalAddQty()">+</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="em-errors" style="display:none;margin-top:10px;padding:8px 10px;border-radius:6px;
+      border:1px solid #c44;background:#300;font-size:11px;
+      font-family:'JetBrains Mono',monospace;color:#f99;line-height:1.6"></div>
+  `;
+
+  $('modal-footer').innerHTML = `
+    <button class="btn danger" onclick="deleteSelected();closeModal()">Delete</button>
+    <div style="flex:1"></div>
+    <button class="btn primary" onclick="closeModal()">Done</button>
+  `;
+
+  $('modal-overlay').classList.add('show');
+  setTimeout(() => { const el = $('em-label'); if(el){ el.focus(); el.select(); } }, 60);
+  modalRunValidation();
+}
+
+// Modal helper — edits live on the same node object
+function modalLive(key, value) {
+  if (!selectedId || !nodes[selectedId]) return;
+  nodes[selectedId][key] = value;
+  // Sync panel fields
+  if ($('prop-'+key)) {
+    if (key === 'one_shot') $('prop-oneshot').checked = value;
+    else if ($(`prop-${key}`).tagName !== 'SELECT') $(`prop-${key}`).value = value;
+    else $(`prop-${key}`).value = value;
+  }
+  if (key === 'label') renderAll();
+}
+
+function modalCommitId(newVal, origVal) {
+  const errEl = $('em-id-err');
+  if (!errEl) return;
+  errEl.style.display = 'none';
+  if (!selectedId) return;
+  const newId = newVal.trim().replace(/\s+/g,'_').toLowerCase();
+  if (!newId || newId === selectedId) { $('em-id').value = selectedId; return; }
+  if (nodes[newId]) {
+    errEl.textContent = `"${newId}" already exists`;
+    errEl.style.display = '';
+    $('em-id').value = selectedId;
+    return;
+  }
+  // Reuse existing commitId logic
+  commitId(newId, selectedId);
+  $('em-id').value = selectedId; // selectedId updated by commitId
+  $('modal-title').textContent = `Edit — ${nodes[selectedId]?.label || selectedId}`;
+}
+
+function modalCommitNum(key, newVal, origVal) {
+  commitNum(key, newVal, origVal);
+  // Sync modal field in case it was reset
+  const el = $(`em-${key}`);
+  if (el && selectedId && nodes[selectedId]) el.value = nodes[selectedId][key];
+  modalRunValidation();
+}
+
+function modalAddReq() {
+  const input = $('em-req-add');
+  if (!input) return;
+  const reqId = input.value.trim();
+  if (!reqId || !nodes[reqId]) { toast(nodes[reqId] ? '' : `"${reqId}" not found`); return; }
+  addReq_inner(reqId);
+  input.value = '';
+  refreshModalReqBadges();
+  modalRunValidation();
+}
+
+function modalRemoveReq(reqId) {
+  if (!selectedId) return;
+  const n = nodes[selectedId];
+  snapshot();
+  n.requires = n.requires.filter(r => r !== reqId);
+  edges = edges.filter(e => !(e.from === reqId && e.to === selectedId));
+  renderAll(); renderReqBadges(n); runValidation();
+  refreshModalReqBadges();
+  modalRunValidation();
+}
+
+function modalAddQty() {
+  const idEl = $('em-qty-id'), nEl = $('em-qty-n');
+  if (!idEl) return;
+  const reqId = idEl.value.trim();
+  const qty = parseInt(nEl.value) || 1;
+  if (!reqId) return;
+  snapshot();
+  const n = nodes[selectedId];
+  if (!n.quantity_requires) n.quantity_requires = {};
+  n.quantity_requires[reqId] = qty;
+  idEl.value = ''; nEl.value = '1';
+  renderAll(); renderQtyBadges(n); runValidation();
+  refreshModalQtyBadges();
+  modalRunValidation();
+}
+
+function modalUpdateQty(reqId, qty) {
+  if (!selectedId) return;
+  snapshot();
+  if (qty < 1) { modalRemoveQty(reqId); return; }
+  nodes[selectedId].quantity_requires[reqId] = qty;
+  renderAll(); runValidation();
+  modalRunValidation();
+}
+
+function modalRemoveQty(reqId) {
+  if (!selectedId) return;
+  snapshot();
+  delete nodes[selectedId].quantity_requires[reqId];
+  renderAll(); renderQtyBadges(nodes[selectedId]); runValidation();
+  refreshModalQtyBadges();
+  modalRunValidation();
+}
+
+function refreshModalReqBadges() {
+  const el = $('em-req-badges');
+  if (!el || !selectedId) return;
+  const n = nodes[selectedId];
+  el.innerHTML = (n.requires||[]).map(r =>
+    `<span class="badge">${r}
+      <span class="remove-req" onclick="modalRemoveReq('${r}')">×</span></span>`
+  ).join('');
+}
+
+function refreshModalQtyBadges() {
+  const el = $('em-qty-badges');
+  if (!el || !selectedId) return;
+  const n = nodes[selectedId];
+  el.innerHTML = Object.entries(n.quantity_requires||{}).map(([k,v]) =>
+    `<span class="badge qty">${k}:
+      <input type="number" min="1" value="${v}" style="width:36px"
+        onchange="modalUpdateQty('${k}',+this.value)"
+        onclick="event.stopPropagation()"/>
+      <span class="remove-req" onclick="modalRemoveQty('${k}')">×</span></span>`
+  ).join('');
+}
+
+function modalRunValidation() {
+  const box = $('em-errors');
+  if (!box || !selectedId || !nodes[selectedId]) return;
+  const n = nodes[selectedId];
+  const errors = [];
+  for (const req of n.requires||[]) if (!nodes[req]) errors.push(`requires "${req}" — not found`);
+  for (const [req,qty] of Object.entries(n.quantity_requires||{})) {
+    if (!nodes[req]) errors.push(`qty_requires "${req}" — not found`);
+    if (!Number.isInteger(qty)||qty<1) errors.push(`qty_requires "${req}" — must be positive int`);
+  }
+  if ((n.type==='gate'||n.type==='milestone') && !(n.requires?.length) && !Object.keys(n.quantity_requires||{}).length)
+    errors.push('Gates/milestones need at least one prerequisite');
+  if (n.reward < 0) errors.push('Reward should be ≥ 0');
+  box.style.display = errors.length ? '' : 'none';
+  box.innerHTML = errors.map(e=>`⚠ ${e}`).join('<br>');
+}
+
+function escHtml(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Internal addReq without UI side-effects (used by modal)
+function addReq_inner(reqId) {
+  if (!selectedId) return;
+  const n = nodes[selectedId];
+  if (n.requires.includes(reqId) || reqId === selectedId) return;
+  snapshot();
+  n.requires.push(reqId);
+  if (!edges.some(e => e.from === reqId && e.to === selectedId))
+    edges.push({ from: reqId, to: selectedId });
+  renderAll(); renderReqBadges(n); runValidation();
+}
+
+// ── Export ────────────────────────────────────────────────────────────────
+
+function showExport(fmt) {
+  let content = '';
+  const nodeList = Object.values(nodes);
+
+  if (fmt === 'json') {
+    content = JSON.stringify({ nodes: nodeList }, null, 2);
+  } else if (fmt === 'training') {
+    const rewardTable = {};
+    const prereqs = {};
+    const qtyPrereqs = {};
+    const oneShots = [];
+    const gates = [];
+    const tiers = {};
+    for (const n of nodeList) {
+      rewardTable[n.id] = n.reward;
+      prereqs[n.id]    = n.requires || [];
+      qtyPrereqs[n.id] = n.quantity_requires || {};
+      if (n.one_shot) oneShots.push(n.id);
+      if (n.type === 'gate' || n.type === 'milestone') gates.push(n.id);
+      if (!tiers[n.tier]) tiers[n.tier] = [];
+      tiers[n.tier].push(n.id);
+    }
+    content = JSON.stringify({
+      nodes:             Object.fromEntries(nodeList.map(n=>[n.id,n])),
+      reward_table:      rewardTable,
+      requires:          prereqs,
+      quantity_requires: qtyPrereqs,
+      one_shot_ids:      oneShots,
+      gate_ids:          gates,
+      tiers
+    }, null, 2);
+  }
+
+  $('modal-title').textContent = fmt === 'training' ? 'Training Config (JSON)' : fmt.toUpperCase();
+  $('modal-content').innerHTML = `<textarea id="export-text" readonly>${escapeHtml(content)}</textarea>`;
+  $('modal-footer').innerHTML = `
+    <button class="btn" onclick="downloadExport('${fmt}')">Download</button>
+    <button class="btn" onclick="copyExport()">Copy</button>
+    <button class="btn primary" onclick="closeModal()">Done</button>
+  `;
+  $('modal-overlay').classList.add('show');
+}
+
+function copyExport() {
+  navigator.clipboard.writeText($('export-text').value);
+  toast('Copied to clipboard');
+}
+
+function downloadExport(fmt) {
+  const text = $('export-text').value;
+  const name = fmt === 'training' ? 'training_config.json' : `tech_tree.json`;
+  const blob = new Blob([text], { type: 'text/plain' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  toast(`Downloaded ${name}`);
+}
+
+function escapeHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Import ────────────────────────────────────────────────────────────────
+
+function importJSON() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json';
+  input.onchange = e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        loadFromData(data);
+        toast(`Loaded ${Object.keys(nodes).length} nodes`);
+      } catch(err) {
+        toast('Import failed: ' + err.message);
+      }
+    };
+    reader.readAsText(file);
+  };
+  input.click();
+}
+
+function loadFromData(data) {
+  nodes = {};
+  edges = [];
+
+  // Training JSON stores requires/quantity_requires flat at top level — merge into nodes
+  const rawNodes = data.nodes || [];
+  const flatReqs    = data.requires          || {};
+  const flatQtyReqs = data.quantity_requires || {};
+
+  for (const n of (Array.isArray(rawNodes) ? rawNodes : Object.values(rawNodes))) {
+    nodes[n.id] = {
+      ...n,
+      requires:          flatReqs[n.id]    ?? n.requires          ?? [],
+      quantity_requires: flatQtyReqs[n.id] ?? n.quantity_requires ?? {},
+      pos: n.pos || [100, 100],
+    };
+  }
+
+  // Rebuild all edges from requires AND quantity_requires
+  for (const n of Object.values(nodes)) {
+    for (const req of (n.requires || [])) {
+      if (nodes[req] && !edges.some(e => e.from === req && e.to === n.id)) {
+        edges.push({ from: req, to: n.id });
+      }
+    }
+  }
+  autoLayout();
+  updateDatalist();
+  select(null);
+}
+
+// ── Keyboard shortcuts ────────────────────────────────────────────────────
+
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+  if (e.key === 'Delete' || e.key === 'Backspace') deleteSelected();
+  if (e.key === 'Escape') { select(null); setMode('select'); closeModal(); }
+  if (e.key === 'z' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); undoAction(); }
+  if (e.key === 'Enter' || e.key === 'e') { if (selectedId) openEditModal(selectedId); }
+  if (e.key === 'n') addNodeModal();
+  if (e.key === 's' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); showExport('json'); }
+  if (e.key === 'c' && !e.ctrlKey && !e.metaKey) setMode('connect');
+  if (e.key === 'd' && !e.ctrlKey) setMode('delete');
+  if (e.key === 'v') setMode('select');
+});
+
+// ── Seed data ─────────────────────────────────────────────────────────────
+
+const SEED_DATA = window.SEED_DATA || { nodes: [] };
+
+// ── Boot ──────────────────────────────────────────────────────────────────
+
+function getBootData() {
+  try {
+    const saved = localStorage.getItem('hrl_seed_data');
+    if (saved) return JSON.parse(saved);
+  } catch(e) {}
+  return SEED_DATA;
+}
+
+loadFromData(getBootData());
+</script>
+</body>
+</html>

@@ -1,0 +1,73 @@
+[
+  {
+    "id": 1,
+    "biome": "plains",
+    "nearby_structures": [
+      "none"
+    ],
+    "y_level": 72,
+    "task": "obtain_iron_pickaxe",
+    "reasoning_path": [
+      "harvest_wood",
+      "craft_planks_and_sticks",
+      "craft_crafting_table",
+      "craft_wooden_pickaxe",
+      "mine_stone",
+      "craft_stone_pickaxe",
+      "mine_iron_ore",
+      "craft_furnace",
+      "smelt_iron",
+      "craft_iron_pickaxe"
+    ],
+    "reasoning_text": "Standard iron progression with no nearby shortcuts.",
+    "context_matters": false,
+    "context_explanation": "No structures nearby, so the standard crafting path is optimal.",
+    "inventory": {},
+    "health": 20,
+    "time_of_day": "day",
+    "source": "example"
+  },
+  {
+    "id": 2,
+    "biome": "plains",
+    "nearby_structures": [
+      "village"
+    ],
+    "y_level": 72,
+    "task": "obtain_food",
+    "reasoning_path": [
+      "go_to_village",
+      "harvest_village_crops"
+    ],
+    "reasoning_text": "Use the nearby village as a fast food source.",
+    "context_matters": true,
+    "context_explanation": "Village crops are faster than hunting when a village is nearby.",
+    "inventory": {},
+    "health": 20,
+    "time_of_day": "day",
+    "source": "example"
+  },
+  {
+    "id": 3,
+    "biome": "forest",
+    "nearby_structures": [
+      "none"
+    ],
+    "y_level": 72,
+    "task": "build_shelter",
+    "reasoning_path": [
+      "harvest_wood",
+      "craft_planks_and_sticks",
+      "build_walls_and_roof",
+      "craft_and_place_door",
+      "place_torches"
+    ],
+    "reasoning_text": "Gather wood and construct a minimal lit shelter.",
+    "context_matters": false,
+    "context_explanation": "Forest provides abundant wood, but no shortcut changes the plan.",
+    "inventory": {},
+    "health": 20,
+    "time_of_day": "night",
+    "source": "example"
+  }
+]
