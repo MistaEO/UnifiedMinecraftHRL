@@ -127,6 +127,7 @@ class MinecraftHRLEnv(gym.Env):
         tech_tree_reward: bool = True,
         task: str | None = None,
         max_episode_steps: int = 1000,
+        use_llm: bool = True,
     ):
         super().__init__()
 
@@ -135,10 +136,14 @@ class MinecraftHRLEnv(gym.Env):
         self.render_mode = render_mode
         self._fixed_task = task
         self.max_episode_steps = max_episode_steps
+        self.use_llm = use_llm
 
-        # Spaces — action space is updated after connect() returns real skill count
+        # Observation space depends on whether LLM conditioning is enabled:
+        #   LLM + DQN : 41-dim state  +  768-dim skill embedding  =  809-dim
+        #   DQN only  : 41-dim state  (no LLM call, baseline mode)
+        obs_dim = OBS_DIM if use_llm else STATE_DIM
         self.observation_space = spaces.Box(
-            low=-np.inf, high=np.inf, shape=(OBS_DIM,), dtype=np.float32
+            low=-np.inf, high=np.inf, shape=(obs_dim,), dtype=np.float32
         )
         self.action_space = spaces.Discrete(1)  # placeholder
 
@@ -322,18 +327,16 @@ class MinecraftHRLEnv(gym.Env):
 
     def _build_obs(self, raw: dict) -> np.ndarray:
         """
-        Build the 809-dim observation:
-            [StateEncoder(41) | LLM skill embedding(768)]
+        LLM + DQN  →  [StateEncoder(41) | LLM skill embedding(768)]  =  809-dim
+        DQN only   →  [StateEncoder(41)]                              =   41-dim
         """
-        # Build dict that both StateEncoder and agent.py accept
-        adapted = self._adapt_state(raw)
+        adapted  = self._adapt_state(raw)
+        state_vec = StateEncoder.encode(adapted)   # (41,)
 
-        # 41-dim state encoding
-        state_vec = StateEncoder.encode(adapted)          # (41,)
+        if not self.use_llm:
+            return state_vec.astype(np.float32)
 
-        # 768-dim LLM skill embedding (API call each step)
-        _, embedding = get_skill_and_embedding(adapted)  # (768,)
-
+        _, embedding = get_skill_and_embedding(adapted)   # (768,)
         return np.concatenate([state_vec, embedding]).astype(np.float32)
 
     def _adapt_state(self, raw: dict) -> dict:
@@ -428,6 +431,7 @@ def make_minecraft_env(
     tech_tree_path: str | None = None,
     tech_tree_reward: bool = True,
     task: str | None = None,
+    use_llm: bool = True,
 ) -> MinecraftHRLEnv:
     """
     Factory function matching the interface expected by main.py.
@@ -449,4 +453,5 @@ def make_minecraft_env(
         tech_tree_path=tech_tree_path,
         tech_tree_reward=tech_tree_reward,
         task=task,
+        use_llm=use_llm,
     )

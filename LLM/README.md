@@ -137,7 +137,22 @@ cd UnifiedMinecraftHRL/Minecraft-HRL-Agent/python
 python main.py --mode hybrid --policy PPO --timesteps 100000
 ```
 
-Optional flags:
+**To run the comparison experiment:**
+```bash
+# Condition A — LLM + DQN  (809-dim obs, Qwen guides every step)
+python main.py --policy DQN --timesteps 100000
+
+# Condition B — DQN only   (41-dim obs, no LLM, baseline)
+python main.py --policy DQN --timesteps 100000 --no-llm
+```
+
+Save checkpoints to different directories so results don't overwrite:
+```bash
+python main.py --policy DQN --checkpoint ./checkpoints/llm_dqn
+python main.py --policy DQN --checkpoint ./checkpoints/dqn_only --no-llm
+```
+
+Other optional flags:
 ```
 --policy DQN                  use DQN instead of PPO
 --mode pure_rl                disable novelty exploration

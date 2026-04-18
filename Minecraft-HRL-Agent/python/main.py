@@ -87,6 +87,10 @@ def parse_args():
     
     # Environment conditioning
     parser.add_argument(
+        "--no-llm", action="store_true",
+        help="Disable LLM skill conditioning — observation is 41-dim state only (DQN-only baseline)"
+    )
+    parser.add_argument(
         "--env-aware", action="store_true",
         help="Include biome/structure one-hot encoding in observation (env-aware condition)"
     )
@@ -155,6 +159,7 @@ def train(args):
         reference_dataset=args.reference_dataset,
         tech_tree_path=args.tech_tree,
         tech_tree_reward=not args.no_tech_tree_reward,
+        use_llm=not args.no_llm,
     )
     
     # Connect to Mineflayer bot
