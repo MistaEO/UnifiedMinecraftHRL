@@ -96,7 +96,10 @@ def encode_state(sample: dict) -> np.ndarray:
     offset += len(TASKS)
 
     # Y-level normalized (1-dim)
+    # Guard against None (bridge returns null position when bot dies / respawns)
     y = sample.get("y_level", 64)
+    if y is None:
+        y = 64
     vec[offset] = float(np.clip(y / 256.0, 0.0, 1.0))
 
     return vec

@@ -45,18 +45,35 @@ _PYTHON_DIR = os.path.dirname(os.path.abspath(__file__))
 _LLM_DIR    = os.path.normpath(os.path.join(_PYTHON_DIR, "..", "..", "LLM"))
 _DATA_DIR   = os.path.normpath(os.path.join(_PYTHON_DIR, "..", "data"))
 
-for _p in (_PYTHON_DIR, _LLM_DIR, _DATA_DIR):
+# _PYTHON_DIR must be at index 0 so python/agent/ package is found before LLM/agent.py.
+# Python may have already added it somewhere in sys.path, so force it to the front.
+if _PYTHON_DIR in sys.path:
+    sys.path.remove(_PYTHON_DIR)
+sys.path.insert(0, _PYTHON_DIR)
+
+# LLM and data dirs appended to the back — available for imports but never shadow
+# local packages.
+for _p in (_LLM_DIR, _DATA_DIR):
     if _p not in sys.path:
-        sys.path.insert(0, _p)
+        sys.path.append(_p)
 
 # ── Local imports ─────────────────────────────────────────────────────────────
 from models.state_encoder import StateEncoder, STATE_DIM, BIOME_IDX
 from models.rtg_utils import load_reward_table, skill_reward
 from reward.context_reward import ContextRewardShaper
 
-from agent import get_skill_and_embedding          # LLM/agent.py
+# LLM/agent.py — loaded explicitly to avoid collision with python/agent/ package
+import importlib.util as _ilu
+_llm_agent_spec = _ilu.spec_from_file_location(
+    "llm_agent", os.path.join(_LLM_DIR, "agent.py")
+)
+_llm_agent_mod = _ilu.module_from_spec(_llm_agent_spec)
+_llm_agent_spec.loader.exec_module(_llm_agent_mod)  # type: ignore[union-attr]
+get_skill_and_embedding = _llm_agent_mod.get_skill_and_embedding
+
 from environment import EMBEDDING_DIM               # LLM/environment.py
 from config import BIOMES, TASKS                    # data/config.py
+from skill_stats import SkillStatsLogger            # per-skill execution tracker
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 OBS_DIM = STATE_DIM + EMBEDDING_DIM  # 41 + 768 = 809
@@ -178,6 +195,12 @@ class MinecraftHRLEnv(gym.Env):
         self._prev_path_score: float = 0.0
         self._last_raw_state: dict = {}
 
+        # Per-skill stats logger
+        self._skill_logger = SkillStatsLogger(
+            log_path="logs/skill_stats.json",
+            print_every=100,
+        )
+
     # ── Dataset loading ───────────────────────────────────────────────────────
 
     def _load_dataset(self, path: str) -> None:
@@ -205,7 +228,7 @@ class MinecraftHRLEnv(gym.Env):
         while time.time() < deadline:
             try:
                 ws = websocket.WebSocket()
-                ws.settimeout(10)
+                ws.settimeout(120)  # skills can take up to 90s; 120s gives headroom
                 ws.connect(f"ws://{self.host}:{self.port}")
                 self._ws = ws
 
@@ -219,6 +242,7 @@ class MinecraftHRLEnv(gym.Env):
                 self.action_space   = spaces.Discrete(resp["n"])
 
                 self._connected = True
+                self._skill_logger.register_skills(self._bot_skills)
                 print(f"[Env] Connected — {resp['n']} bot skills available")
                 return True
 
@@ -295,8 +319,18 @@ class MinecraftHRLEnv(gym.Env):
 
         reward = bot_reward
         reward += self._tech_tree_reward(skill_name)
-        reward += self._context_reward(skill_name, raw_state)
+        context_bonus = self._context_reward(skill_name, raw_state)
+        reward += context_bonus
         reward += self._path_reward()
+
+        # Log per-skill stats
+        self._skill_logger.record(
+            action=action,
+            reward=reward,
+            base_reward=bot_reward,
+            context_bonus=context_bonus,
+            info=info,
+        )
 
         obs = self._build_obs(raw_state)
 
@@ -348,12 +382,14 @@ class MinecraftHRLEnv(gym.Env):
         agent.py needs:      all of the above + health, hunger, time_of_day,
                              inventory, equipped_tool
         """
-        pos = raw.get("position", {})
+        pos = raw.get("position") or {}
+        # pos values may be None if bot died/respawned mid-state-query — default to safe values
+        _y = pos.get("y", 64)
         return {
             "task":            self._episode_task,
             "biome":           self._normalize_biome(raw.get("biome", "plains")),
             "nearby_structures": raw.get("nearby_structures", ["none"]),
-            "y_level":         pos.get("y", 64),
+            "y_level":         _y if _y is not None else 64,
             "health":          raw.get("health", 20.0),
             "hunger":          raw.get("food", 20.0),
             "time_of_day":     "day" if raw.get("is_day", True) else "night",

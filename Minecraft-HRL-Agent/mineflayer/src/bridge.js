@@ -53,6 +53,7 @@ class Bridge {
         this._stuckLevel     = 0;       // highest escape level already tried
         this._stuckInterval  = null;
         this._skillRunning   = false;   // true while _handleStep is executing a skill
+        this._pythonConnected = false;  // gates stuck detector — don't fire before Python connects
     }
 
     /**
@@ -67,7 +68,9 @@ class Bridge {
         this.wss.on('connection', (ws) => {
             console.log('[Bridge] Python client connected');
             this.client = ws;
-            
+            this._pythonConnected = true;
+            this._resetStuckState(); // fresh window — don't penalise idle wait before connect
+
             ws.on('message', async (message) => {
                 try {
                     const request = JSON.parse(message);
@@ -85,6 +88,8 @@ class Bridge {
             ws.on('close', () => {
                 console.log('[Bridge] Python client disconnected');
                 this.client = null;
+                this._pythonConnected = false;
+                this._resetStuckState(); // pause stuck timer while Python is away
             });
             
             ws.on('error', (error) => {
@@ -242,7 +247,7 @@ class Bridge {
      */
     _getState() {
         const position = this.bot.entity.position;
-        
+
         return {
             // Player stats
             health: this.bot.health,
@@ -524,6 +529,7 @@ class Bridge {
 
     async _checkStuck() {
         if (!this.bot?.entity) return;
+        if (!this._pythonConnected) return; // don't fire before Python has connected
 
         const pos  = this.bot.entity.position;
         const now  = Date.now();
@@ -548,11 +554,13 @@ class Bridge {
 
         const stuckMs = now - this._lastMoveTime;
 
-        // L1 and L2 call pathfinder.stop() and bot.dig() which directly abort
-        // whatever skill is currently executing, causing spurious "Path was stopped"
-        // and "Digging aborted" failures.  Skip them while a skill is in flight;
-        // only allow L3/L4 (which ultimately kill/respawn the bot) through.
+        // While a skill is actively running, suppress ALL stuck levels — the bridge's
+        // 90s skill timeout is responsible for aborting runaway skills.  Firing the
+        // stuck detector mid-skill causes "Digging aborted" / "Path was stopped" noise
+        // and — critically — L4 RCON-killing the bot while it is legitimately mining
+        // deep underground (slow movement ≠ stuck).
         const skillRunning = this._skillRunning;
+        if (skillRunning) return;
 
         if (stuckMs >= STUCK_L4_MS && this._stuckLevel < 4) {
             this._stuckLevel = 4;
@@ -560,17 +568,17 @@ class Bridge {
             await this._rconKill();
             this._lastMoveTime = now; // give it time to respawn before next check
 
-        } else if (stuckMs >= STUCK_L3_MS && this._stuckLevel < 3 && !skillRunning) {
+        } else if (stuckMs >= STUCK_L3_MS && this._stuckLevel < 3) {
             this._stuckLevel = 3;
             console.warn(`[StuckDetector] L3 (${stuckMs / 1000}s stuck) — place block + jump`);
             await this._escapePlaceBlock();
 
-        } else if (stuckMs >= STUCK_L2_MS && this._stuckLevel < 2 && !skillRunning) {
+        } else if (stuckMs >= STUCK_L2_MS && this._stuckLevel < 2) {
             this._stuckLevel = 2;
             console.warn(`[StuckDetector] L2 (${stuckMs / 1000}s stuck) — mine surrounding blocks`);
             await this._escapeMineAround();
 
-        } else if (stuckMs >= STUCK_L1_MS && this._stuckLevel < 1 && !skillRunning) {
+        } else if (stuckMs >= STUCK_L1_MS && this._stuckLevel < 1) {
             this._stuckLevel = 1;
             console.warn(`[StuckDetector] L1 (${stuckMs / 1000}s stuck) — jump + walk`);
             await this._escapeJumpWalk();

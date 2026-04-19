@@ -51,7 +51,9 @@ class SkillManager {
             id: 1,
             name: 'harvest_wood',
             description: 'Find and harvest the nearest tree',
-            preconditions: () => true, // Can always attempt
+            // Trees only exist above ground — block when the bot is underground.
+            // Y>=55 keeps surface dips valid while rejecting caves/mineshafts.
+            preconditions: () => Math.floor(this.bot.entity.position.y) >= 55,
             execute: async () => {
                 return await this._harvestWood();
             }
@@ -494,46 +496,74 @@ class SkillManager {
 
     async _harvestWood() {
         const logTypes = ['oak_log', 'birch_log', 'spruce_log', 'jungle_log', 'acacia_log', 'dark_oak_log'];
-        
+
         for (const logType of logTypes) {
             const log = this.bot.findBlock({
                 matching: block => block.name === logType,
                 maxDistance: 64
             });
-            
+
             if (log) {
-                await this._goTo(log.position);
-                await this.bot.dig(log);
+                const { GoalNear } = require('mineflayer-pathfinder').goals;
+                const safeMove = new (require('mineflayer-pathfinder').Movements)(this.bot);
+                safeMove.allowFreeMotion = false;
+                this.bot.pathfinder.setMovements(safeMove);
+                await this.bot.pathfinder.goto(
+                    new GoalNear(log.position.x, log.position.y, log.position.z, 4)
+                );
+
+                // Equip axe if available, after navigation
+                try { await this.bot.tool.equipForBlock(log); } catch (_) {}
+
+                const freshLog = this.bot.blockAt(log.position);
+                if (!freshLog || freshLog.name === 'air') continue;
+
+                await this.bot.dig(freshLog);
                 return { success: true, message: `Harvested ${logType}` };
             }
         }
-        
+
         return { success: false, message: 'No trees found nearby' };
     }
 
     async _mineBlock(blockName, count = 1) {
         let mined = 0;
-        
+
         while (mined < count) {
             const block = this.bot.findBlock({
                 matching: b => b.name === blockName || b.name.includes(blockName),
                 maxDistance: 32
             });
-            
+
             if (!block) {
-                return { 
-                    success: mined > 0, 
-                    message: `Mined ${mined}/${count} ${blockName}` 
+                return {
+                    success: mined > 0,
+                    message: `Mined ${mined}/${count} ${blockName}`
                 };
             }
-            
-            // Equip best tool
+
+            // Navigate within reach distance (4 blocks) — no need to walk right up
+            const { GoalNear } = require('mineflayer-pathfinder').goals;
+            const safeMove = new (require('mineflayer-pathfinder').Movements)(this.bot);
+            safeMove.allowFreeMotion = false;
+            this.bot.pathfinder.setMovements(safeMove);
+            await this.bot.pathfinder.goto(
+                new GoalNear(block.position.x, block.position.y, block.position.z, 4)
+            );
+
+            // Equip best tool AFTER arriving — prevents unequip during pathfinding
             await this._equipBestTool(block);
-            await this._goTo(block.position);
-            await this.bot.dig(block);
+
+            // Re-fetch block in case chunk updated during navigation
+            const freshBlock = this.bot.blockAt(block.position);
+            if (!freshBlock || freshBlock.name === 'air') {
+                continue; // block gone, try finding another
+            }
+
+            await this.bot.dig(freshBlock);
             mined++;
         }
-        
+
         return { success: true, message: `Mined ${count} ${blockName}` };
     }
 
@@ -575,7 +605,7 @@ class SkillManager {
         if (!craftingTable) {
             return { success: false, message: 'No crafting table available' };
         }
-        
+
         await this._goTo(craftingTable.position);
         
         const recipe = this.bot.recipesFor(mcData.itemsByName[itemName]?.id, null, 1, craftingTable)[0];
@@ -597,22 +627,59 @@ class SkillManager {
         if (!item) {
             return { success: false, message: `No ${itemName} in inventory` };
         }
-        
-        // Find a suitable position to place
-        const pos = this.bot.entity.position.offset(1, 0, 0).floored();
-        const referenceBlock = this.bot.blockAt(pos.offset(0, -1, 0));
-        
-        if (!referenceBlock) {
-            return { success: false, message: 'No reference block found' };
-        }
-        
+
+        const Vec3 = require('vec3');
+        // Try cardinal + diagonal neighbors. Each entry: [dx, dz] — we place at
+        // the block *above* the ground block at that offset.
+        const offsets = [
+            [1, 0], [-1, 0], [0, 1], [0, -1],
+            [1, 1], [-1, 1], [1, -1], [-1, -1],
+        ];
+
         try {
             await this.bot.equip(item, 'hand');
-            await this.bot.placeBlock(referenceBlock, new (require('vec3'))(0, 1, 0));
-            return { success: true, message: `Placed ${itemName}` };
         } catch (error) {
-            return { success: false, message: `Failed to place ${itemName}: ${error.message}` };
+            return { success: false, message: `Could not equip ${itemName}: ${error.message}` };
         }
+
+        const botPos = this.bot.entity.position.floored();
+        const failures = [];
+
+        for (const [dx, dz] of offsets) {
+            const placePos = botPos.offset(dx, 0, dz);
+            const groundPos = placePos.offset(0, -1, 0);
+            const referenceBlock = this.bot.blockAt(groundPos);
+            const placeTarget = this.bot.blockAt(placePos);
+
+            // Need solid ground below
+            if (!referenceBlock || referenceBlock.boundingBox !== 'block') {
+                failures.push(`${dx},${dz}:noground`);
+                continue;
+            }
+            // Need empty space to place into
+            if (!placeTarget || (placeTarget.name !== 'air' && placeTarget.name !== 'cave_air')) {
+                failures.push(`${dx},${dz}:occupied(${placeTarget ? placeTarget.name : 'null'})`);
+                continue;
+            }
+
+            try {
+                await this.bot.placeBlock(referenceBlock, new Vec3(0, 1, 0));
+                // Verify the block actually appeared
+                await this._wait(250);
+                const verify = this.bot.blockAt(placePos);
+                if (verify && verify.name === itemName) {
+                    return { success: true, message: `Placed ${itemName} at ${placePos.x},${placePos.y},${placePos.z}` };
+                }
+                failures.push(`${dx},${dz}:unverified(${verify ? verify.name : 'null'})`);
+            } catch (error) {
+                failures.push(`${dx},${dz}:${error.message.slice(0, 40)}`);
+            }
+        }
+
+        return {
+            success: false,
+            message: `Failed to place ${itemName}: no valid spot (${failures.slice(0, 3).join('; ')})`
+        };
     }
 
     async _eatFood() {
@@ -739,17 +806,14 @@ class SkillManager {
 
     async _returnToSurface() {
         const mcData = require('minecraft-data')(this.bot.version);
-
         const climbMove = new Movements(this.bot, mcData);
-        climbMove.canDig = true;   // may need to re-mine collapsed blocks
+        climbMove.canDig = true;
         climbMove.canSwim = false;
         climbMove.allowSprinting = false;
         this.bot.pathfinder.setMovements(climbMove);
-
         const timeoutPromise = new Promise((_, reject) =>
             setTimeout(() => reject(new Error('_returnToSurface timed out after 3 minutes')), 180000)
         );
-
         try {
             await Promise.race([
                 this.bot.pathfinder.goto(new GoalY(64)),
@@ -767,64 +831,99 @@ class SkillManager {
     }
 
     async _smeltItem(inputItem, outputItem) {
-        // Step 1: Find an existing furnace in the world
-        let furnaceBlock = this.bot.findBlock({
-            matching: b => b.name === 'furnace',
-            maxDistance: 32
-        });
-
-        // Step 2: If no furnace in world, craft one and place it
-        if (!furnaceBlock) {
-            if (!this._hasItem('furnace')) {
-                // Craft from cobblestone
-                const craftResult = await this._craftWithTable('furnace', 1);
-                if (!craftResult.success) {
-                    return { success: false, message: `Could not craft furnace: ${craftResult.message}` };
-                }
-            }
-            // Place furnace next to bot
-            const placeResult = await this._placeBlock('furnace');
-            if (!placeResult.success) {
-                return { success: false, message: `Could not place furnace: ${placeResult.message}` };
-            }
-            await this._wait(300); // let block appear in world
-            furnaceBlock = this.bot.findBlock({
-                matching: b => b.name === 'furnace',
-                maxDistance: 8
-            });
-            if (!furnaceBlock) {
-                return { success: false, message: 'Placed furnace but could not locate it' };
-            }
-        }
-
-        // Step 3: Walk up to the furnace
-        await this._goTo(furnaceBlock.position);
-
-        // Step 4: Pick fuel — prefer coal/charcoal, fall back to planks/logs
-        const fuelItem = this.bot.inventory.items().find(i =>
+        // ---- Step 0: fail fast on anything we can check BEFORE placing a furnace ----
+        const pickFuel = () => this.bot.inventory.items().find(i =>
             i.name === 'coal' ||
             i.name === 'charcoal' ||
             i.name.includes('planks') ||
             i.name.includes('_log')
         );
+        let fuelItem = pickFuel();
         if (!fuelItem) {
             return { success: false, message: 'No fuel available (need coal, planks, or logs)' };
         }
-
-        // Step 5: Check we still have the input item
-        const inputObj = this.bot.inventory.items().find(i => i.name === inputItem);
+        let inputObj = this.bot.inventory.items().find(i => i.name === inputItem);
         if (!inputObj) {
             return { success: false, message: `No ${inputItem} in inventory` };
         }
 
-        try {
-            const furnace = await this.bot.openFurnace(furnaceBlock);
+        // ---- Step 1: find or create a furnace ----
+        let furnaceBlock = this.bot.findBlock({
+            matching: b => b.name === 'furnace',
+            maxDistance: 32
+        });
 
-            // Load fuel and input (smelt up to 8 at once)
+        if (!furnaceBlock) {
+            if (!this._hasItem('furnace')) {
+                const craftResult = await this._craftWithTable('furnace', 1);
+                if (!craftResult.success) {
+                    return { success: false, message: `Could not craft furnace: ${craftResult.message}` };
+                }
+            }
+            const placeResult = await this._placeBlock('furnace');
+            if (!placeResult.success) {
+                return { success: false, message: `Could not place furnace: ${placeResult.message}` };
+            }
+
+            // Give the chunk a moment, then rescan in a wider radius.
+            await this._wait(400);
+            furnaceBlock = this.bot.findBlock({
+                matching: b => b.name === 'furnace',
+                maxDistance: 16
+            });
+            if (!furnaceBlock) {
+                // One more retry after a longer wait — block updates can lag.
+                await this._wait(600);
+                furnaceBlock = this.bot.findBlock({
+                    matching: b => b.name === 'furnace',
+                    maxDistance: 32
+                });
+            }
+            if (!furnaceBlock) {
+                return { success: false, message: 'Placed furnace but could not locate it in world' };
+            }
+        }
+
+        // ---- Step 2: walk within reach of the furnace ----
+        try {
+            await this._goTo(furnaceBlock.position);
+        } catch (error) {
+            return { success: false, message: `Could not reach furnace: ${error.message}` };
+        }
+
+        const distToFurnace = this.bot.entity.position.distanceTo(furnaceBlock.position);
+        if (distToFurnace > 4.5) {
+            return {
+                success: false,
+                message: `Furnace out of reach (d=${distToFurnace.toFixed(1)})`
+            };
+        }
+
+        // Refresh fuel/input refs (inventory may have shifted during navigation/crafting)
+        fuelItem = pickFuel();
+        inputObj = this.bot.inventory.items().find(i => i.name === inputItem);
+        if (!fuelItem) return { success: false, message: 'Lost fuel during navigation' };
+        if (!inputObj) return { success: false, message: `Lost ${inputItem} during navigation` };
+
+        // ---- Step 3: open the furnace (retry once if it fails) ----
+        let furnace;
+        try {
+            furnace = await this.bot.openFurnace(furnaceBlock);
+        } catch (error) {
+            await this._wait(500);
+            try {
+                furnace = await this.bot.openFurnace(furnaceBlock);
+            } catch (err2) {
+                return { success: false, message: `openFurnace failed twice: ${err2.message}` };
+            }
+        }
+
+        try {
+            // ---- Step 4: load fuel + input ----
             await furnace.putFuel(fuelItem.type, null, Math.min(fuelItem.count, 8));
             await furnace.putInput(inputObj.type, null, Math.min(inputObj.count, 8));
 
-            // Wait for at least one output (each item takes ~10 game ticks = ~0.5 s real time)
+            // ---- Step 5: wait for first output (one iron ~ 10s in-game) ----
             await new Promise((resolve, reject) => {
                 const deadline = setTimeout(() => {
                     reject(new Error('Smelting timed out after 45 s'));
@@ -839,12 +938,11 @@ class SkillManager {
                 }, 500);
             });
 
-            // Collect finished ingots
             await furnace.takeOutput();
             furnace.close();
-
             return { success: true, message: `Smelted ${inputItem} → ${outputItem}` };
         } catch (error) {
+            try { furnace.close(); } catch (_) {}
             return { success: false, message: `Smelting failed: ${error.message}` };
         }
     }
